@@ -191,33 +191,42 @@ FROM sales
 WHERE stockcode='20725';
 
 -- 2. 1단계에서 확인한 거래내역 중 '20725'를 제외하고 구매한 제품 확인
-SELECT DISTINCT s1.invoiceno
-FROM sales AS s1
-JOIN sales AS s2
-ON s1.invoiceno=s2.invoiceno
-WHERE s2.stockcode='20725'
-AND s1.stockcode <> '20725';
+SELECT invoiceno
+FROM sales
+WHERE stockcode <> '20725'
+  AND invoiceno IN (
+    SELECT invoiceno
+    FROM sales
+    WHERE stockcode = '20725'
+)
+GROUP BY invoiceno;
+
 
 -- 3. 특정제품과 함께 구매한 제품의 주문수량을 구하고 주문수량이 높은 순서대로 상위 10개 나열
-SELECT s1.stockcode, s1.description, SUM(s1.quantity)
-FROM sales AS s1
-JOIN sales AS s2
-ON s1.invoiceno=s2.invoiceno
-WHERE s2.stockcode='20725'
-AND s1.stockcode <> '20725'
-GROUP BY s1.stockcode, s1.description
-ORDER BY SUM(quantity) DESC
+SELECT stockcode, description, SUM(quantity) AS total_quantity
+FROM sales
+WHERE invoiceno IN (
+    SELECT DISTINCT invoiceno
+    FROM sales
+    WHERE stockcode = '20725'
+)
+AND stockcode <> '20725'
+GROUP BY stockcode, description
+ORDER BY total_quantity DESC
 LIMIT 10;
 
+
 -- 위에서 LUNCH가 포함되는 제품은 제외하고 싶음
-SELECT s1.stockcode, s1.description, SUM(s1.quantity)
-FROM sales AS s1
-JOIN sales AS s2
-ON s1.invoiceno=s2.invoiceno
-WHERE s2.stockcode='20725'
-AND s1.stockcode <> '20725'
-AND s1.description NOT LIKE '%LUNCH%'
-GROUP BY s1.stockcode, s1.description
+SELECT stockcode, description, SUM(quantity) AS total_quantity
+FROM sales
+WHERE invoiceno IN (
+    SELECT DISTINCT invoiceno
+    FROM sales
+    WHERE stockcode = '20725'
+)
+AND stockcode <> '20725'
+AND description NOT LIKE '%LUNCH%'
+GROUP BY stockcode, description
 ORDER BY SUM(quantity) DESC
 LIMIT 10;
 
@@ -255,3 +264,88 @@ WHERE rnk = 2;
 -- DENSE_RANK()
 -- 동일한 값에는 같은 순위를 부여하고 다음 순위는 그 이전 순위에서 건너뛰지 않고 바로 이어지는 순위 함수
 
+-- 리텐션 : 고객이 주기적으로 방문해 서비스를 꾸준이 이용하는지 -> 유지에 관련된 지표
+-- 2010년 구매 이력 고객들의 2011년 유지율 확인
+-- 2010년에 구매한 고객들 중 2011년 구매 고객
+
+SELECT COUNT(*) AS retention_customer_count
+FROM (
+  SELECT DISTINCT customerid
+  FROM sales
+  WHERE invoicedate BETWEEN '2010-01-01' AND '2010-12-31'
+    AND customerid IS NOT NULL AND customerid <> ''
+) AS s1
+WHERE customerid IN (
+  SELECT DISTINCT customerid
+  FROM sales
+  WHERE invoicedate BETWEEN '2011-01-01' AND '2011-12-31'
+    AND customerid IS NOT NULL AND customerid <> ''
+);
+
+-- 고객별 재구매까지의 구매기간 확인
+-- 1. 고객별 제품 구매 순서 정하기
+WITH a AS (
+  SELECT customerid, invoicedate
+  FROM sales
+  WHERE customerid <> ''
+  GROUP BY customerid, invoicedate
+)
+SELECT customerid, invoicedate
+, DENSE_RANK() OVER (PARTITION BY customerid ORDER BY invoicedate) AS date_no
+FROM a;
+
+-- 2. 1에서 확인한 순서를 바탕으로 첫구매와 재구매기간 확인
+WITH a AS (
+  SELECT customerid, invoicedate,
+         DENSE_RANK() OVER (PARTITION BY customerid ORDER BY invoicedate) AS date_no
+  FROM (
+    SELECT DISTINCT customerid, invoicedate
+    FROM sales
+    WHERE customerid <> ''
+  ) AS sub
+)
+SELECT a.customerid, a.invoicedate, a.date_no
+, b.customerid, b.invoicedate, b.date_no
+FROM a
+INNER JOIN a AS b
+ON a.customerid=b.customerid
+AND a.date_no+1 = b.date_no
+WHERE a.date_no = 1;
+
+-- 3. 첫구매와 재구매 기간의 차이 계산
+WITH a AS (
+  SELECT customerid, invoicedate,
+         DENSE_RANK() OVER (PARTITION BY customerid ORDER BY invoicedate) AS date_no
+  FROM (
+    SELECT DISTINCT customerid, invoicedate
+    FROM sales
+    WHERE customerid <> ''
+  ) AS sub
+)
+SELECT a.customerid, a.invoicedate, a.date_no
+, b.customerid, b.invoicedate, b.date_no
+, DATEDIFF(b.invoicedate, a.invoicedate) AS purchase_period
+FROM a
+INNER JOIN a AS b
+ON a.customerid=b.customerid
+AND a.date_no+1 = b.date_no
+WHERE a.date_no = 1;
+
+-- 구매기간 차이 일수에 대한 평균 지표 구하기
+WITH a AS (
+  SELECT customerid, invoicedate,
+         DENSE_RANK() OVER (PARTITION BY customerid ORDER BY invoicedate) AS date_no
+  FROM (
+    SELECT DISTINCT customerid, invoicedate
+    FROM sales
+    WHERE customerid <> ''
+  ) AS sub
+)
+SELECT avg(DATEDIFF(b.invoicedate, a.invoicedate)) AS avg_purchase_period
+FROM a
+INNER JOIN a AS b
+ON a.customerid=b.customerid
+AND a.date_no+1 = b.date_no
+WHERE a.date_no = 1;
+
+-- 첫 고객은 구매 이후 다음 구매까지 평균 63일이 걸림

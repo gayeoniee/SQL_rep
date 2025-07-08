@@ -225,3 +225,13 @@ WHERE 기온 >= 10 AND 습도 >= 20;
 EXPLAIN ANALYZE
 SELECT * FROM 날씨
 WHERE 년도=2023 AND 월=6 AND 도시 LIKE '서울%';
+
+
+USE 분석실습;
+-- 인덱스 테스트
+SHOW INDEX FROM sales;
+SELECT * FROM sales;
+EXPLAIN ANALYZE
+SELECT * FROM sales
+WHERE customerid = '21035'
+AND (invoicedate BETWEEN '2010-12-01' AND '2010-12-02');
