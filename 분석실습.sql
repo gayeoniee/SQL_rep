@@ -1,6 +1,9 @@
+USE 분석실습;
+
 -- 매출 트렌드
 
 SELECT * FROM sales;
+SELECT * FROM customer;
 
 -- 기간별 매출 현황
 SELECT invoicedate
